@@ -266,6 +266,17 @@ All JavaScript must adhere to [JavaScript Standard Style](https://standardjs.com
   }
   export default ClassName
   ```
+All code must comply to the newly added linguistic anti-pattern section:
+
+A.1
+
+“Get” - more than accessor
+
+A getter that performs actions other than returning the corresponding attribute without documenting it. Example: method getImageData which, no matter the attribute value, every time returns a new object 
+
+“Is” returns more than a boolean
+
+The name of a method is a predicate suggesting a true/false value in return. However the return type is not Boolean but rather a more complex type thus allowing a wider range of values without documenting them. Example: isValid with return type int
 
 ### CoffeeScript Styleguide
 
