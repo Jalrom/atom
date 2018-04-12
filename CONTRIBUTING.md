@@ -6,6 +6,8 @@ The following is a set of guidelines for contributing to Atom and its packages, 
 
 #### Table Of Contents
 
+Salut
+
 [Code of Conduct](#code-of-conduct)
 
 [I don't want to read this whole thing, I just have a question!!!](#i-dont-want-to-read-this-whole-thing-i-just-have-a-question)
