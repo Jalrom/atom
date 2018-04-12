@@ -33,7 +33,7 @@ class AtomApplication extends EventEmitter {
   // Public: The entry point into the Atom application.
   static open (options) {
     if (!options.socketPath) {
-      const username = process.platform === 'win32' ? process.env.USERNAME : process.env.USER
+      const {username} = os.userInfo()
 
       // Lowercasing the ATOM_HOME to make sure that we don't get multiple sockets
       // on case-insensitive filesystems due to arbitrary case differences in paths.
@@ -44,7 +44,7 @@ class AtomApplication extends EventEmitter {
         .update('|')
         .update(process.arch)
         .update('|')
-        .update(username)
+        .update(username || '')
         .update('|')
         .update(atomHomeUnique)
 
@@ -93,7 +93,6 @@ class AtomApplication extends EventEmitter {
     this.quitting = false
     this.getAllWindows = this.getAllWindows.bind(this)
     this.getLastFocusedWindow = this.getLastFocusedWindow.bind(this)
-
     this.resourcePath = options.resourcePath
     this.devResourcePath = options.devResourcePath
     this.version = options.version
@@ -114,9 +113,13 @@ class AtomApplication extends EventEmitter {
       ? path.join(process.env.ATOM_HOME, 'config.json')
       : path.join(process.env.ATOM_HOME, 'config.cson')
 
-    this.configFile = new ConfigFile(configFilePath)
+    this.configFile = ConfigFile.at(configFilePath)
     this.config = new Config({
-      saveCallback: settings => this.configFile.update(settings)
+      saveCallback: settings => {
+        if (!this.quitting) {
+          return this.configFile.update(settings)
+        }
+      }
     })
     this.config.setSchema(null, {type: 'object', properties: _.clone(ConfigSchema)})
 
@@ -201,6 +204,7 @@ class AtomApplication extends EventEmitter {
 
   openWithOptions (options) {
     const {
+      projectSpecification,
       initialPaths,
       pathsToOpen,
       executedFrom,
@@ -255,6 +259,7 @@ class AtomApplication extends EventEmitter {
         profileStartup,
         clearWindowState,
         addToLastWindow,
+        projectSpecification,
         env
       })
     } else if (urlsToOpen.length > 0) {
@@ -558,8 +563,8 @@ class AtomApplication extends EventEmitter {
       window.setPosition(x, y)
     }))
 
-    this.disposable.add(ipcHelpers.respondTo('set-user-settings', (window, settings) =>
-      this.configFile.update(settings)
+    this.disposable.add(ipcHelpers.respondTo('set-user-settings', (window, settings, filePath) =>
+      ConfigFile.at(filePath || this.configFilePath).update(JSON.parse(settings))
     ))
 
     this.disposable.add(ipcHelpers.respondTo('center-window', window => window.center()))
@@ -818,6 +823,7 @@ class AtomApplication extends EventEmitter {
     window,
     clearWindowState,
     addToLastWindow,
+    projectSpecification,
     env
   } = {}) {
     if (!pathsToOpen || pathsToOpen.length === 0) return
@@ -838,13 +844,12 @@ class AtomApplication extends EventEmitter {
     let existingWindow
     if (!newWindow) {
       existingWindow = this.windowForPaths(pathsToOpen, devMode)
-      const stats = pathsToOpen.map(pathToOpen => fs.statSyncNoException(pathToOpen))
       if (!existingWindow) {
         let lastWindow = window || this.getLastFocusedWindow()
         if (lastWindow && lastWindow.devMode === devMode) {
           if (addToLastWindow || (
-              stats.every(s => s.isFile && s.isFile()) ||
-              (stats.some(s => s.isDirectory && s.isDirectory()) && !lastWindow.hasProjectPath()))) {
+              locationsToOpen.every(({stat}) => stat && stat.isFile()) ||
+              (locationsToOpen.some(({stat}) => stat && stat.isDirectory()) && !lastWindow.hasProjectPath()))) {
             existingWindow = lastWindow
           }
         }
@@ -852,7 +857,7 @@ class AtomApplication extends EventEmitter {
     }
 
     let openedWindow
-    if (existingWindow) {
+    if (existingWindow && (projectSpecification == null || projectSpecification.config == null)) {
       openedWindow = existingWindow
       openedWindow.openLocations(locationsToOpen)
       if (openedWindow.isMinimized()) {
@@ -877,6 +882,7 @@ class AtomApplication extends EventEmitter {
       }
       if (!resourcePath) resourcePath = this.resourcePath
       if (!windowDimensions) windowDimensions = this.getDimensionsForNewWindow()
+
       openedWindow = new AtomWindow(this, this.fileRecoveryService, {
         initialPaths,
         locationsToOpen,
@@ -887,6 +893,7 @@ class AtomApplication extends EventEmitter {
         windowDimensions,
         profileStartup,
         clearWindowState,
+        projectSpecification,
         env
       })
       this.addWindow(openedWindow)
@@ -1267,11 +1274,11 @@ class AtomApplication extends EventEmitter {
       initialLine = initialColumn = null
     }
 
-    if (url.parse(pathToOpen).protocol == null) {
-      pathToOpen = path.resolve(executedFrom, fs.normalize(pathToOpen))
-    }
+    const normalizedPath = path.normalize(path.resolve(executedFrom, fs.normalize(pathToOpen)))
+    const stat = fs.statSyncNoException(normalizedPath)
+    if (stat || !url.parse(pathToOpen).protocol) pathToOpen = normalizedPath
 
-    return {pathToOpen, initialLine, initialColumn}
+    return {pathToOpen, stat, initialLine, initialColumn}
   }
 
   // Opens a native dialog to prompt the user for a path.
